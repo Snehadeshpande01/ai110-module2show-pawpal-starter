@@ -32,10 +32,18 @@ Yes. I changed the `Task` class so it references a `Pet` object directly instead
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
 - How did you decide which constraints mattered most?
 
+The scheduler considers three constraints: task priority (high/medium/low), preferred time slot (morning/afternoon/evening), and a daily time budget (`max_daily_minutes`). It also detects conflicts when two tasks share the same time slot, and filters tasks against the owner's availability window using `fits_in_window()`.
+
+Priority was treated as the most important constraint because a missed high-priority task (like feeding) has real consequences for the pet's wellbeing. Time slot preference comes second — it keeps the schedule aligned with the pet's natural routine. The daily budget acts as a hard cap that drops lower-priority tasks when time runs out.
+
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
+
+The scheduler uses a greedy selection strategy in `select_tasks_for_day()`: it walks the ranked list in order and adds each task if it fits within the remaining daily minutes, stopping when the budget is exhausted. This means it never rearranges tasks to fit a shorter one in place of a longer one — a 30-minute walk blocks a later 10-minute feed even if swapping them would fit more total tasks.
+
+This is a reasonable tradeoff for a pet care context because priority order should be respected over pure time efficiency. A pet owner would rather complete the high-priority walk and skip a low-priority grooming session than do the grooming first just because it is shorter. Simplicity also matters: the greedy approach is easy to understand, debug, and explain to a non-technical user.
 
 ---
 

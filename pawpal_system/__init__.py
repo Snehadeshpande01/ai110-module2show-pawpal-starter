@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
+from itertools import combinations
 from typing import List, Optional, Dict
 
 
@@ -20,10 +21,35 @@ class Task:
     frequency: Optional[str] = None
     completed: bool = False
     notes: Optional[str] = None
+    due_date: Optional[date] = None
 
     def mark_completed(self) -> None:
-        """Mark this task as completed."""
+        """Mark this task as completed and schedule the next occurrence for recurring tasks."""
         self.completed = True
+
+        if self.frequency is None or self.pet is None:
+            return
+
+        freq = self.frequency.lower()
+        base = self.due_date if self.due_date else date.today()
+
+        _FREQUENCY_DELTA = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}
+        delta = _FREQUENCY_DELTA.get(freq)
+        if delta is None:
+            return
+        next_due = base + delta
+
+        next_task = Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            task_type=self.task_type,
+            preferred_time=self.preferred_time,
+            frequency=self.frequency,
+            notes=self.notes,
+            due_date=next_due,
+        )
+        self.pet.add_task(next_task)
 
     def is_high_priority(self) -> bool:
         """Return True if this task has high priority."""
@@ -40,15 +66,21 @@ class Task:
         except ValueError:
             return True
 
-        preferred = self.preferred_time.lower()
-        if preferred in {"morning", "am", "a.m."}:
-            return start_window <= time(12, 0) and end_window >= time(8, 0)
-        if preferred in {"afternoon", "pm", "p.m."}:
-            return start_window <= time(18, 0) and end_window >= time(12, 0)
-        if preferred in {"evening", "night"}:
-            return start_window <= time(22, 0) and end_window >= time(17, 0)
-
-        return True
+        _SLOT_WINDOWS = {
+            "morning":   (time(8, 0),  time(12, 0)),
+            "am":        (time(8, 0),  time(12, 0)),
+            "a.m.":      (time(8, 0),  time(12, 0)),
+            "afternoon": (time(12, 0), time(18, 0)),
+            "pm":        (time(12, 0), time(18, 0)),
+            "p.m.":      (time(12, 0), time(18, 0)),
+            "evening":   (time(17, 0), time(22, 0)),
+            "night":     (time(17, 0), time(22, 0)),
+        }
+        slot = _SLOT_WINDOWS.get(self.preferred_time.lower())
+        if slot is None:
+            return True
+        slot_start, slot_end = slot
+        return start_window <= slot_end and end_window >= slot_start
 
     def describe_reason(self) -> str:
         """Return a short explanation for why this task is important."""
@@ -125,10 +157,7 @@ class Owner:
 
     def all_tasks(self) -> List[Task]:
         """Return all tasks across every pet owned by this owner."""
-        tasks: List[Task] = []
-        for pet in self.pets:
-            tasks.extend(pet.tasks)
-        return tasks
+        return [task for pet in self.pets for task in pet.tasks]
 
     def pending_tasks(self) -> List[Task]:
         """Return all incomplete tasks across every pet."""
@@ -142,7 +171,7 @@ class Scheduler:
 
     def generate_schedule(self) -> List[Task]:
         """Generate a daily schedule from the owner's pending tasks."""
-        tasks = [task for task in self.owner.pending_tasks()]
+        tasks = self.owner.pending_tasks()
         tasks = self.rank_tasks(tasks)
         tasks = self.filter_tasks_by_constraints(tasks)
         return self.select_tasks_for_day(tasks)
@@ -178,6 +207,100 @@ class Scheduler:
                 selected.append(task)
                 total += task.duration_minutes
         return selected
+
+    def sort_by_time(self, tasks: Optional[List[Task]] = None) -> List[Task]:
+        """Sort tasks chronologically by preferred time slot.
+
+        Uses a lambda with a TIME_ORDER lookup dict as the sort key so that
+        tasks are ordered morning -> afternoon -> evening.  Tasks with no
+        preferred_time value fall to the end of the list (key = 99).
+
+        Args:
+            tasks: List of tasks to sort. Defaults to all tasks for this owner.
+
+        Returns:
+            A new list sorted by time slot, earliest first.
+        """
+        TIME_ORDER = {"morning": 0, "afternoon": 1, "evening": 2}
+        if tasks is None:
+            tasks = self.owner.all_tasks()
+        return sorted(tasks, key=lambda t: TIME_ORDER.get(
+            (t.preferred_time or "").lower(), 99
+        ))
+
+    def filter_tasks(
+        self,
+        tasks: Optional[List[Task]] = None,
+        completed: Optional[bool] = None,
+        pet_name: Optional[str] = None,
+    ) -> List[Task]:
+        """Filter tasks by completion status and/or pet name.
+
+        Each filter is applied only when its argument is provided, so the
+        method can be used for status-only, pet-only, or combined filtering
+        without separate helper methods.
+
+        Args:
+            tasks:     Tasks to filter. Defaults to all tasks for this owner.
+            completed: If True, keep only completed tasks. If False, keep only
+                       pending tasks. If None, completion status is not filtered.
+            pet_name:  If provided, keep only tasks whose pet name matches
+                       exactly (case-sensitive). If None, all pets are included.
+
+        Returns:
+            A new list containing only the tasks that match all supplied filters.
+        """
+        if tasks is None:
+            tasks = self.owner.all_tasks()
+        if completed is not None:
+            tasks = [t for t in tasks if t.completed == completed]
+        if pet_name is not None:
+            tasks = [t for t in tasks if t.pet and t.pet.name == pet_name]
+        return tasks
+
+    def detect_conflicts(self, tasks: Optional[List[Task]] = None) -> List[str]:
+        """Detect scheduling conflicts and return human-readable warning messages.
+
+        Two tasks conflict when they share the same preferred_time slot — the
+        owner cannot attend to two pets simultaneously regardless of which pets
+        are involved.  Uses itertools.combinations to generate every unique pair
+        within a slot without duplicates or index arithmetic.
+
+        Tasks with no preferred_time are skipped because they have no declared
+        slot to conflict with.  The method never raises an exception; callers
+        receive an empty list when no conflicts exist.
+
+        Args:
+            tasks: Tasks to check. Defaults to all pending tasks for this owner.
+
+        Returns:
+            A list of warning strings, one per conflicting pair.  Empty when
+            no conflicts are detected.
+        """
+        if tasks is None:
+            tasks = self.owner.pending_tasks()
+
+        # Group pending tasks by their time slot
+        slot_buckets: Dict[str, List[Task]] = {}
+        for task in tasks:
+            slot = (task.preferred_time or "").lower()
+            if not slot:
+                continue
+            slot_buckets.setdefault(slot, []).append(task)
+
+        warnings: List[str] = []
+        for slot, slot_tasks in slot_buckets.items():
+            if len(slot_tasks) < 2:
+                continue
+            for task_a, task_b in combinations(slot_tasks, 2):
+                    pet_a = task_a.pet.name if task_a.pet else "unknown pet"
+                    pet_b = task_b.pet.name if task_b.pet else "unknown pet"
+                    warnings.append(
+                        f"WARNING: '{task_a.title}' ({pet_a}) and "
+                        f"'{task_b.title}' ({pet_b}) are both scheduled in the "
+                        f"{slot} slot — possible conflict."
+                    )
+        return warnings
 
     def explain_choice(self, task: Task) -> str:
         """Return a human-readable explanation for a scheduled task."""
