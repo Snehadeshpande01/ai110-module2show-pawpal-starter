@@ -95,3 +95,50 @@ The greedy daily selection algorithm is the weakest part of the design. A smarte
 **c. Key takeaway**
 
 The most important thing I learned is that AI is most useful as a *question generator*, not an answer provider. Asking "what could go wrong with this method?" consistently surfaced better test cases than trying to think of them myself. But the AI's structural suggestions (like keeping a duplicate task list in the Scheduler) needed to be evaluated against the actual data flow of the system before accepting them. The skill is knowing when to use the suggestion as a starting point and when to push back.
+
+---
+
+## 6. AI Model and Prompting Strategy Comparison
+
+During this project I used **Claude (Anthropic)** as the primary AI assistant and compared two distinct prompting strategies across several tasks. The results were meaningfully different.
+
+---
+
+### Strategy A — Vague, High-Level Prompts
+
+**Example prompt used:**
+> "Help me add scheduling features to my pet care app."
+
+**What the AI produced:**
+Claude responded with a broad architectural overview — it suggested adding a `ScheduleManager` class separate from `Scheduler`, a global task registry, and a priority queue data structure. The suggestions were technically sound in isolation but did not fit the existing four-class design. Specifically, it proposed that `Scheduler` should hold its own copy of the pet and task lists, which would have created a stale-data bug: any task added after the scheduler was constructed would have been invisible to `generate_schedule()`.
+
+**Verdict — Flawed.** The high-level prompt caused the AI to design from scratch rather than extend what existed. Two suggestions (the separate manager class and the duplicate task list) were rejected after tracing through the data flow manually and confirming through a test that `owner.all_tasks()` was the correct source of truth.
+
+---
+
+### Strategy B — Specific, Constrained Prompts
+
+**Example prompts used:**
+> "Given this method signature and docstring, what inputs would cause it to behave unexpectedly?"
+
+> "I have a `mark_completed()` method on `Task` that should spawn a new task on the pet's list using `timedelta`. The pet reference is set by `add_task()`. Write only the body of the method — do not change the class structure."
+
+**What the AI produced:**
+Both prompts returned directly usable output. The edge-case prompt surfaced three scenarios that hadn't been considered: a task with `frequency="monthly"` (unsupported), a recurring task where `pet` is `None` (orphan), and a task with no `due_date` (needs a fallback to `date.today()`). All three became explicit tests that now pass. The constrained implementation prompt produced the correct `_FREQUENCY_DELTA` dict-lookup pattern on the first attempt, with no structural changes needed.
+
+**Verdict — Useful.** Constraining the prompt to a single method with explicit boundary conditions eliminated the architectural noise and produced output that could be dropped directly into the codebase. The orphan-task edge case in particular was something that would likely have been missed without the AI's systematic boundary analysis.
+
+---
+
+### Comparison Summary
+
+| | Strategy A (Vague) | Strategy B (Specific) |
+|---|---|---|
+| Prompt style | Open-ended feature request | Constrained to one method + explicit constraints |
+| Output quality | Broad, partially misaligned | Directly usable |
+| Structural suggestions | Introduced duplicate state (rejected) | Matched existing design |
+| Edge cases surfaced | None | 3 (all became tests) |
+| Revision rounds needed | 2–3 before usable | 0–1 |
+| Best used for | Initial brainstorming only | Implementation and testing |
+
+**Overall conclusion:** Vague prompts are useful at the very start of a project when exploring options, but become a liability during implementation — the AI optimises for completeness of its answer rather than compatibility with existing code. Specific, method-scoped prompts with explicit constraints consistently produced better results once the design was established. The most reliable pattern throughout this project was: *describe the existing structure first, then ask for one thing at a time.*
