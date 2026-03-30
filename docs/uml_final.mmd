@@ -1,0 +1,63 @@
+classDiagram
+    class Owner {
+        + name: str
+        + availability: dict
+        + preferences: dict
+        + pets: list~Pet~
+        + add_pet(pet: Pet)
+        + set_availability(availability: dict)
+        + prefers_task_type(task_type: str) bool
+        + summary() str
+        + all_tasks() list~Task~
+        + pending_tasks() list~Task~
+    }
+
+    class Pet {
+        + name: str
+        + species: str
+        + age: int
+        + care_requirements: list~str~
+        + preferences: dict
+        + tasks: list~Task~
+        + add_task(task: Task)
+        + needs_care() list~str~
+        + preferred_activity_times() list~str~
+        + describe() str
+        + pending_tasks() list~Task~
+    }
+
+    class Task {
+        + title: str
+        + duration_minutes: int
+        + priority: str
+        + task_type: str
+        + pet: Pet
+        + preferred_time: str
+        + frequency: str
+        + completed: bool
+        + notes: str
+        + due_date: date
+        + mark_completed()
+        + is_high_priority() bool
+        + fits_in_window(window: dict) bool
+        + describe_reason() str
+    }
+
+    class Scheduler {
+        + owner: Owner
+        + constraints: dict
+        + generate_schedule() list~Task~
+        + rank_tasks(tasks) list~Task~
+        + filter_tasks_by_constraints(tasks) list~Task~
+        + select_tasks_for_day(tasks) list~Task~
+        + sort_by_time(tasks) list~Task~
+        + filter_tasks(tasks, completed, pet_name) list~Task~
+        + detect_conflicts(tasks) list~str~
+        + explain_choice(task: Task) str
+    }
+
+    Owner "1" *-- "*" Pet : owns
+    Pet "1" *-- "*" Task : has
+    Task "*" --> "0..1" Pet : assigned to
+    Scheduler "1" --> "1" Owner : schedules for
+    Task ..> Owner : spawns via mark_completed
