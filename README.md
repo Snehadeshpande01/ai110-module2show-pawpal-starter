@@ -117,3 +117,31 @@ skipped  = [t for t in ranked if t not in selected]
 ```bash
 pytest tests/
 ```
+
+---
+
+## Testing PawPal+
+
+Run the full test suite with:
+
+```bash
+python -m pytest tests/test_pawpal.py -v
+```
+
+### What the tests cover
+
+| Category | # Tests | What is verified |
+|---|---|---|
+| **Sorting correctness** | 3 | `sort_by_time()` returns tasks in morning → afternoon → evening order; tasks with no `preferred_time` fall to the end; same-slot order is stable |
+| **Recurrence logic** | 6 | Completing a `daily` task creates a new task due the next day; `weekly` advances by 7 days; missing `due_date` falls back to today; unknown frequencies (e.g. `"monthly"`) and non-recurring tasks do not spawn follow-ups; orphan tasks (no pet) do not crash |
+| **Conflict detection** | 5 | Two tasks in the same slot produce a warning; different slots produce none; three tasks in one slot yield 3 pair-wise warnings; completed tasks are excluded; tasks without a `preferred_time` are never flagged |
+| **Edge cases** | 4 | Pet with no tasks, owner with no pets, a task that exactly fills the daily budget (included), a task that exceeds it (excluded) |
+| **Core behaviour** | 3 | Basic task addition, daily minute-limit scheduling, `describe_reason()` output |
+
+**Total: 21 tests — all passing.**
+
+### Confidence Level
+
+**4 / 5 stars**
+
+The core scheduling pipeline (ranking, filtering, daily-limit selection), recurring task logic, conflict detection, and time-slot sorting are all exercised across both happy paths and meaningful edge cases, giving strong confidence that the main features behave correctly. One star is held back because the tests do not yet cover the `fits_in_window` availability filtering in depth, multi-pet interactions with the full `generate_schedule()` pipeline, or the Streamlit UI layer (`app.py`).
