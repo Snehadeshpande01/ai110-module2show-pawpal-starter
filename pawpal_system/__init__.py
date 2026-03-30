@@ -16,7 +16,7 @@ class Task:
     duration_minutes: int
     priority: str = "medium"
     task_type: Optional[str] = None
-    pet: Optional[Pet] = None
+    pet: Optional[Pet] = field(default=None, compare=False, repr=False)
     preferred_time: Optional[str] = None
     frequency: Optional[str] = None
     completed: bool = False
